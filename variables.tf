@@ -1,11 +1,11 @@
 variable "vpc_cider" {
-  description = "VPC Cider Block"
   type        = string
+  description = "VPC Cider Block"
 }
 
 variable "vpc_name" {
-  description = "VPC Cider Block"
   type        = string
+  description = "VPC Cider Block"
 }
 variable "subnet_cidrs" {
   type        = list(string)
@@ -22,9 +22,25 @@ variable "subnet_names" {
   description = "Public Subnet Name Tags"
 }
 
-variable "aws_profile" {
+variable "password" {
   type        = string
-  description = ""
+  description = "RDS Password"
 }
 
+variable "ec2_key" {
+  type        = string
+  description = "ec2 key pair"
+}
 
+variable "aws_profile" {
+  type        = string
+  description = "AWS account profile to create resources in"
+}
+
+variable "s3_domain" {
+  type = string
+}
+
+variable "s3_name" {
+  type = string
+}
