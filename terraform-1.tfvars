@@ -10,10 +10,16 @@ vpc_name = "CSYE-6225 Assignment 4 VPC"
 
 password = "RandomPassword#123"
 
-ec2_key = "windows11"
+ec2_key = "windows10Prod"
 
 aws_profile = "prod"
 
 s3_domain = "psribalaji12"
 
 s3_name = "testbucketsri"
+
+aws_profile_name= "prod"
+
+domain_Name = "prod.csye6225.me"
+
+region = "us-east-1"
