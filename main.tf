@@ -774,14 +774,14 @@ resource "aws_lb_listener" "webapp-Listener" {
 
 # end 
 
-# resource "aws_route53_record" "www" {
-#   zone_id = data.aws_route53_zone.selected.zone_id
-#   name    = data.aws_route53_zone.selected.name
-#   type    = "A"
+resource "aws_route53_record" "www" {
+   zone_id = data.aws_route53_zone.selected.zone_id
+   name    = data.aws_route53_zone.selected.name
+   type    = "A"
   
-#   alias {
-#     name = aws_lb.AppLoadBalancer.dns_name
-#     zone_id = aws_lb.AppLoadBalancer.zone_id
-#     evaluate_target_health = true
-#   }
-# }
+   alias {
+     name = aws_lb.application-Load-Balancer.dns_name
+     zone_id = aws_lb.application-Load-Balancer.zone_id
+     evaluate_target_health = true
+   }
+ }
