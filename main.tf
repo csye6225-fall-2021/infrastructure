@@ -272,7 +272,7 @@ data "template_file" "config_data" {
         cd home/ubuntu
         mkdir server
         cd server
-        echo "{\"db_host\":\"${aws_db_instance.csye6225.endpoint}\",\"db_user\":\"csye6225\",\"db_password\":\"${var.password}\",\"default_database\":\"csye6225\",\"db_port\":3306,\"s3\":\"${aws_s3_bucket.s3.bucket}\"}" > config.json
+        echo "{\"db_host\":\"${aws_db_instance.csye6225.endpoint}\",\"db_user\":\"csye6225\",\"db_password\":\"${var.password}\",\"default_database\":\"csye6225\",\"db_port\":3306,\"bucketName\":\"${aws_s3_bucket.s3.bucket}\"}" > config.json
         cd ..
         sudo chmod -R 777 server
     EOF
