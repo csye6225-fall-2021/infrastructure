@@ -217,7 +217,7 @@ resource "aws_db_subnet_group" "rds-subnet" {
 #db parameter group
 resource "aws_db_parameter_group" "rds-pg" {
   name   = "rds-pg"
-  family = "mysql5.6"
+  family = "mysql5.7"
 }
 
 #db instance
@@ -237,9 +237,11 @@ resource "aws_db_instance" "csye6225" {
   publicly_accessible       = false
   allocated_storage         = 10
   apply_immediately         = true
-  backup_retention_period   = 0
+  backup_retention_period   = 5
   final_snapshot_identifier = true
   skip_final_snapshot =  true
+  availability_zone         = "us-east-1a"
+
 }
 
 resource "aws_s3_bucket" "s3" {
@@ -272,7 +274,12 @@ data "template_file" "config_data" {
         cd home/ubuntu
         mkdir server
         cd server
-        echo "{\"db_host\":\"${aws_db_instance.csye6225.endpoint}\",\"db_user\":\"csye6225\",\"db_password\":\"${var.password}\",\"default_database\":\"csye6225\",\"db_port\":3306,\"bucketName\":\"${aws_s3_bucket.s3.bucket}\"}" > config.json
+        echo "{\"db_host\":\"${aws_db_instance.csye6225.endpoint}\",
+        \"db_user\":\"csye6225\",\"db_password\":\"${var.password}\",
+        \"default_database\":\"csye6225\",\"db_port\":3306,
+        \"bucketName\":\"${aws_s3_bucket.s3.bucket}\",
+        \"replicaDb\":\"${aws_db_instance.rds-replica.address}\",
+        \"SNS_TOPIC_ARN\":\"${aws_sns_topic.sns_email.arn}\"}" > config.json
         cd ..
         sudo chmod -R 777 server
     EOF
@@ -785,3 +792,304 @@ resource "aws_route53_record" "www" {
      evaluate_target_health = true
    }
  }
+
+
+
+# dynamo db 
+
+resource "aws_dynamodb_table" "dynamodb-table" {
+
+  name           = var.dynamo_dbname
+  read_capacity  = var.dynamo_read_capacity
+  write_capacity = var.dynamo_write_capacity
+  hash_key       = "id"
+
+  attribute {
+    name = "id"
+    type = "S"
+  }
+   ttl {
+    attribute_name = "ttl"
+    enabled        = true
+  }
+  tags = {
+    Name = "${var.dynamo_dbname}"
+  }
+
+}
+
+resource "aws_iam_policy" "dynamodb_policy" {
+  name        = "DynamoDB-Policy"
+  description = "Lambda function to upload data to DynamoDB"
+  policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Sid" : "ListAndDescribe",
+        "Effect" : "Allow",
+        "Action" : [
+          "dynamodb:List*",
+          "dynamodb:DescribeReservedCapacity*",
+          "dynamodb:DescribeLimits",
+          "dynamodb:DescribeTimeToLive",
+          "dynamodb:Get*",
+          "dynamodb:PutItem*",
+        ],
+        "Resource" : "*"
+      },
+      {
+        "Sid" : "SpecificTable",
+        "Effect" : "Allow",
+        "Action" : [
+          "dynamodb:BatchGet*",
+          "dynamodb:DescribeStream",
+          "dynamodb:DescribeTable",
+          "dynamodb:Get*",
+          "dynamodb:Query",
+          "dynamodb:Scan",
+          "dynamodb:BatchWrite*",
+          "dynamodb:CreateTable",
+          "dynamodb:Delete*",
+          "dynamodb:Update*",
+          "dynamodb:PutItem"
+        ],
+        "Resource" : "arn:aws:dynamodb:*:*:table/dynamo"
+      }
+    ]
+  })
+}
+
+//EC2 DynamoDB role attachment
+resource "aws_iam_policy_attachment" "ec2_dynamoDB_attach" {
+  name       = "ec2DynamoDBPolicy"
+  roles      = ["${aws_iam_role.ec2_s3_access_role.name}"]
+  policy_arn = aws_iam_policy.dynamodb_policy.arn
+}
+
+#SNS topic and policies
+resource "aws_sns_topic" "sns_email" {
+  name = "email_request"
+}
+
+resource "aws_sns_topic_policy" "sns_email_policy" {
+  arn    = "${aws_sns_topic.sns_email.arn}"
+  policy = "${data.aws_iam_policy_document.sns-topic-policy.json}"
+}
+
+data "aws_iam_policy_document" "sns-topic-policy" {
+  policy_id = "__default_policy_ID"
+
+  statement {
+    actions = [
+      "SNS:Subscribe",
+      "SNS:SetTopicAttributes",
+      "SNS:RemovePermission",
+      "SNS:Receive",
+      "SNS:Publish",
+      "SNS:ListSubscriptionsByTopic",
+      "SNS:GetTopicAttributes",
+      "SNS:DeleteTopic",
+      "SNS:AddPermission",
+    ]
+
+    condition {
+      test     = "StringEquals"
+      variable = "AWS:SourceOwner"
+
+      values = [
+        "${local.aws_user_account_id}",
+      ]
+    }
+
+    effect = "Allow"
+
+    principals {
+      type        = "AWS"
+      identifiers = ["*"]
+    }
+
+    resources = [
+      "${aws_sns_topic.sns_email.arn}",
+    ]
+
+    sid = "__default_statement_ID"
+  }
+}
+
+# IAM policy for SNS
+resource "aws_iam_policy" "sns_iam_policy" {
+  name   = "ec2_iam_policy"
+  policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "SNS:Publish"
+      ],
+      "Resource": "${aws_sns_topic.sns_email.arn}"
+    }
+  ]
+}
+EOF
+}
+
+# Attach the SNS topic policy to the EC2 role
+resource "aws_iam_role_policy_attachment" "ec2_instance_sns" {
+  policy_arn = "${aws_iam_policy.sns_iam_policy.arn}"
+  role       = "${aws_iam_role.ec2_s3_access_role.name}"
+}
+
+#Lambda Function
+resource "aws_lambda_function" "sns_lambda_email" {
+  s3_bucket = "codedeploy.prod.prod.csye6225.me"
+  s3_key    = "userAddLamda.zip"
+  /* filename         = "lambda_function.zip" */
+  function_name    = "userAddLamda"
+  role             = "${aws_iam_role.iam_for_lambda.arn}"
+  handler          = "index.handler"
+  runtime          = "nodejs12.x"
+  /* source_code_hash = "${data.archive_file.lambda_zip.output_base64sha256}" */
+  environment {
+    variables = {
+      timeToLive = "5"
+    }
+  }
+   //depends_on = [aws_s3_bucket_object.object]
+}
+
+#SNS topic subscription to Lambda
+resource "aws_sns_topic_subscription" "lambda" {
+  topic_arn = "${aws_sns_topic.sns_email.arn}"
+  protocol  = "lambda"
+  endpoint  = "${aws_lambda_function.sns_lambda_email.arn}"
+}
+
+#SNS Lambda permission
+resource "aws_lambda_permission" "lambda_sns" {
+  statement_id  = "AllowExecutionFromSNS"
+  action        = "lambda:InvokeFunction"
+  function_name = "${aws_lambda_function.sns_lambda_email.function_name}"
+  principal     = "sns.amazonaws.com"
+  source_arn    = "${aws_sns_topic.sns_email.arn}"
+}
+
+#Lambda Policy
+resource "aws_iam_policy" "aws_lambda_policy" {
+  name        = "aws_lambda_policy"
+  description = "Lambda Policy for dynamo ses and cloudwatch logs"
+  policy      = <<EOF
+{
+   "Version": "2012-10-17",
+   "Statement": [
+       {
+           "Effect": "Allow",
+           "Action": [
+               "logs:CreateLogGroup",
+               "logs:CreateLogStream",
+               "logs:PutLogEvents"
+           ],
+           "Resource": "*"
+       },
+       {
+         "Sid": "LambdaDynamoDBAccess",
+         "Effect": "Allow",
+         "Action": [
+             "dynamodb:GetItem",
+             "dynamodb:PutItem",
+             "dynamodb:UpdateItem"
+         ],
+         "Resource": "arn:aws:dynamodb:${var.region}:${local.aws_user_account_id}:table/dynamo"
+       },
+       {
+         "Sid": "LambdaSESAccess",
+         "Effect": "Allow",
+         "Action": [
+             "ses:VerifyEmailAddress",
+             "ses:SendEmail",
+             "ses:SendRawEmail"
+         ], 
+         "Resource": "*"
+       }
+   ]
+}
+ EOF
+}
+
+resource "aws_iam_role_policy_attachment" "attachDynamoDbPolicyToRole" {
+  role       = aws_iam_role.ec2_s3_access_role.name
+  policy_arn = aws_iam_policy.aws_lambda_policy.arn
+}
+
+#IAM role for lambda sns
+resource "aws_iam_role" "iam_for_lambda" {
+  name = "iam_for_lambda"
+
+  assume_role_policy = <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Action": "sts:AssumeRole",
+      "Principal": {
+        "Service": "lambda.amazonaws.com"
+      },
+      "Effect": "Allow",
+      "Sid": ""
+    }
+  ]
+}
+EOF
+}
+
+#attach lambda policy with lambda role
+## Check
+resource "aws_iam_role_policy_attachment" "attach_lambda_policy_to_lambda_role" {
+  role       = "${aws_iam_role.iam_for_lambda.name}"
+  policy_arn = "${aws_iam_policy.aws_lambda_policy.arn}"
+}
+
+
+resource "aws_iam_policy" "lamda_update_policy" {
+  name        = "LamdaUpdatePolicy"
+  description = "Update Lamda from GH"
+  policy = jsonencode({
+    "Version" : "2012-10-17",
+    "Statement" : [
+      {
+        "Effect" : "Allow",
+        "Action" : "lambda:UpdateFunctionCode",
+        "Resource" : [
+          "arn:aws:lambda:*:*:function:userAddLamda"
+        ]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_user_policy_attachment" "lamda_user_attach" {
+	user = "ghactions-app"
+	policy_arn = aws_iam_policy.lamda_update_policy.arn
+}
+
+# read replica 
+
+resource "aws_db_instance" "rds-replica" {
+  allocated_storage      = 20
+  depends_on             = [aws_security_group.database, aws_db_parameter_group.rds-pg, aws_db_subnet_group.rds-subnet, aws_db_instance.csye6225]
+  engine                 = "mysql"
+  engine_version         = "5.7"
+  instance_class         = "db.t3.micro"
+  multi_az               = false
+  identifier             = "replica"
+  replicate_source_db    = aws_db_instance.csye6225.arn
+  username               = "csye6225"
+  password               = var.password
+  db_subnet_group_name   = aws_db_subnet_group.rds-subnet.name
+  parameter_group_name   = aws_db_parameter_group.rds-pg.name
+  publicly_accessible    = false
+  skip_final_snapshot    = true
+  vpc_security_group_ids = [aws_security_group.database.id]
+  availability_zone      = "us-east-1b"
+}
