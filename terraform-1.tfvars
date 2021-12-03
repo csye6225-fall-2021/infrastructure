@@ -23,3 +23,9 @@ aws_profile_name= "prod"
 domain_Name = "prod.csye6225.me"
 
 region = "us-east-1"
+
+dynamo_read_capacity = "20"
+
+dynamo_write_capacity = "20"
+
+dynamo_dbname = "dynamo"
