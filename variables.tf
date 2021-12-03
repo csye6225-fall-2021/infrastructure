@@ -60,3 +60,14 @@ variable "domain_Name"{
 variable "region" {
   type = string
 }
+
+variable "dynamo_read_capacity"{
+    type = number
+}
+
+variable "dynamo_write_capacity"{
+    type = number
+}
+variable "dynamo_dbname"{
+    type = string
+}
