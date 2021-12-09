@@ -18,7 +18,7 @@ s3_domain = "psribalaji12"
 
 s3_name = "testbucketsri"
 
-aws_profile_name= "prod"
+aws_profile_name = "prod"
 
 domain_Name = "prod.csye6225.me"
 
