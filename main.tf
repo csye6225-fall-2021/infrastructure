@@ -208,15 +208,15 @@ resource "aws_db_parameter_group" "rds-pg" {
   name   = "rds-pg"
   family = "mysql5.7"
   parameter {
-    name         = "performance_schema"
-    value        = 1
+    name = "performance_schema"
+    value = 1
     apply_method = "pending-reboot"
   }
 }
 
 resource "aws_kms_key" "rdsKey" {
-  description = "Custom Managed Key for EBS"
-  policy      = <<EOF
+  description              = "Custom Managed Key for EBS"
+  policy = <<EOF
 {
     "Version": "2012-10-17",
     "Id": "key-default-1",
@@ -327,7 +327,7 @@ data "template_file" "config_data" {
         \"db_user\":\"csye6225\",\"db_password\":\"${var.password}\",
         \"default_database\":\"csye6225\",\"db_port\":3306,
         \"bucketName\":\"${aws_s3_bucket.s3.bucket}\",
-        \"replicaDb\":\"${aws_db_instance.csye6225.endpoint}"\",
+        \"replicaDb\":\"${aws_db_instance.rds-replica.address}"\",
         \"SNS_TOPIC_ARN\":\"${aws_sns_topic.sns_email.arn}\"}" > config.json
         cd ..
         sudo chmod -R 777 server
@@ -392,8 +392,8 @@ resource "aws_iam_instance_profile" "s3_profile" {
 }
 
 resource "aws_kms_key" "key" {
-  description = "Custom Managed Key for EBS"
-  policy      = <<EOF
+  description              = "Custom Managed Key for EBS"
+  policy = <<EOF
 {
     "Version": "2012-10-17",
     "Id": "key-default-1",
@@ -716,17 +716,17 @@ resource "aws_iam_role_policy_attachment" "AmazonCloudWatchAgent" {
 
 #Autoscaling Group
 resource "aws_autoscaling_group" "autoscaling" {
-  name = "autoscaling-group"
-  launch_template {
+  name                 = "autoscaling-group"
+launch_template {
     id      = aws_launch_template.asg_launch_template.id
     version = aws_launch_template.asg_launch_template.latest_version
   }
-  min_size            = 3
-  max_size            = 5
-  default_cooldown    = 60
-  desired_capacity    = 3
-  vpc_zone_identifier = ["${aws_subnet.vpc_01_subnet[0].id}"]
-  target_group_arns   = ["${aws_lb_target_group.albTargetGroup.arn}"]
+  min_size             = 3
+  max_size             = 5
+  default_cooldown     = 60
+  desired_capacity     = 3
+  vpc_zone_identifier  = ["${aws_subnet.vpc_01_subnet[0].id}"]
+  target_group_arns    = ["${aws_lb_target_group.albTargetGroup.arn}"]
   tag {
     key                 = "Name"
     value               = "myEC2Instance"
@@ -1012,8 +1012,8 @@ resource "aws_iam_role_policy_attachment" "ec2_instance_sns" {
 
 #Lambda Function
 resource "aws_lambda_function" "sns_lambda_email" {
-  s3_bucket     = "codedeploy.prod.prod.csye6225.me"
-  s3_key        = "userAddLamda.zip"
+  s3_bucket = "codedeploy.prod.prod.csye6225.me"
+  s3_key    = "userAddLamda.zip"
   function_name = "userAddLamda"
   role          = aws_iam_role.iam_for_lambda.arn
   handler       = "index.handler"
