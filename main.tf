@@ -65,7 +65,7 @@ data "aws_ami" "csye_6225_custom_ami" {
   most_recent = true
 
   //change to using variables
-  owners = ["570209734344","484705939173"]
+  owners = ["570209734344", "484705939173"]
 
   filter {
     name   = "name"
@@ -90,7 +90,7 @@ data "aws_ami" "csye_6225_custom_ami" {
 
 resource "aws_security_group" "application" {
   name        = "application"
-  description = "EC2 security group for EC2 instances that will host web application"
+  description = "Security group for EC2"
   vpc_id      = aws_vpc.vpc_01.id
 
   ingress = [
@@ -126,52 +126,41 @@ resource "aws_security_group" "application" {
       prefix_list_ids  = []
       security_groups  = []
       self             = false
-    },
-    {
-      description = "NODE application"
-      from_port        = 8000
-      to_port          = 8000
-      protocol         = "tcp"
-      cidr_blocks      = ["0.0.0.0/0"]
-      ipv6_cidr_blocks = []
-      prefix_list_ids = []
-      security_groups = []
-      self = false
     }
   ]
   egress = [
     {
-      description = "HTTP"
+      description      = "HTTP"
       from_port        = 80
       to_port          = 80
       protocol         = "tcp"
       cidr_blocks      = ["0.0.0.0/0"]
       ipv6_cidr_blocks = []
-      prefix_list_ids = []
-      security_groups = []
-      self = false
+      prefix_list_ids  = []
+      security_groups  = []
+      self             = false
     },
     {
-      description = "HTTPS"
+      description      = "HTTPS"
       from_port        = 443
       to_port          = 443
       protocol         = "tcp"
       cidr_blocks      = ["0.0.0.0/0"]
       ipv6_cidr_blocks = []
-      prefix_list_ids = []
-      security_groups = []
-      self = false
+      prefix_list_ids  = []
+      security_groups  = []
+      self             = false
     },
     {
-      description = "SQL"
+      description      = "SQL"
       from_port        = 3306
       to_port          = 3306
       protocol         = "tcp"
       cidr_blocks      = ["0.0.0.0/0"]
       ipv6_cidr_blocks = []
-      prefix_list_ids = []
-      security_groups = []
-      self = false
+      prefix_list_ids  = []
+      security_groups  = []
+      self             = false
     },
   ]
   tags = {
@@ -183,7 +172,7 @@ resource "aws_security_group" "database" {
 
   depends_on  = [aws_vpc.vpc_01, aws_security_group.application]
   name        = "database"
-  description = "security group for the database"
+  description = "Security group for RDS-MYSQL"
   vpc_id      = aws_vpc.vpc_01.id
 
   ingress = [
@@ -206,7 +195,7 @@ resource "aws_security_group" "database" {
 
 #db_subnet_group
 resource "aws_db_subnet_group" "rds-subnet" {
-  name = "rds-subnet"
+  name       = "rds-subnet"
   subnet_ids = [aws_subnet.vpc_01_subnet[0].id, aws_subnet.vpc_01_subnet[1].id, aws_subnet.vpc_01_subnet[2].id]
 
   tags = {
@@ -218,6 +207,64 @@ resource "aws_db_subnet_group" "rds-subnet" {
 resource "aws_db_parameter_group" "rds-pg" {
   name   = "rds-pg"
   family = "mysql5.7"
+  parameter {
+    name = "performance_schema"
+    value = 1
+    apply_method = "pending-reboot"
+  }
+}
+
+resource "aws_kms_key" "rdsKey" {
+  description              = "Custom Managed Key for EBS"
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Id": "key-default-1",
+    "Statement": [
+        {
+            "Sid": "Enable IAM User Permissions",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": [
+                    "arn:aws:iam::${local.aws_user_account_id}:root",
+                    "arn:aws:iam::${local.aws_user_account_id}:user/prod"
+                ]
+            },
+            "Action": "kms:*",
+            "Resource": "*"
+        },
+        {
+            "Sid": "Allow service-linked role use of the customer managed key",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::${local.aws_user_account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+            },
+            "Action": [
+                "kms:Encrypt",
+                "kms:Decrypt",
+                "kms:ReEncrypt*",
+                "kms:GenerateDataKey*",
+                "kms:DescribeKey"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "Allow attachment of persistent resources",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::${local.aws_user_account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+            },
+            "Action": "kms:CreateGrant",
+            "Resource": "*",
+            "Condition": {
+                "Bool": {
+                    "kms:GrantIsForAWSResource": "true"
+                }
+            }
+        }
+    ]
+}
+EOF
 }
 
 #db instance
@@ -239,34 +286,36 @@ resource "aws_db_instance" "csye6225" {
   apply_immediately         = true
   backup_retention_period   = 5
   final_snapshot_identifier = true
-  skip_final_snapshot =  true
+  skip_final_snapshot       = true
   availability_zone         = "us-east-1a"
-
+  storage_encrypted         = true
+  kms_key_id                = aws_kms_key.rdsKey.arn
+  parameter_group_name      = aws_db_parameter_group.rds-pg.name
 }
 
 resource "aws_s3_bucket" "s3" {
-  bucket = "${var.s3_name}.${var.aws_profile}.${var.s3_domain}"
-  acl    = "private"
+  bucket        = "${var.s3_name}.${var.aws_profile}.${var.s3_domain}"
+  acl           = "private"
   force_destroy = true
 
-    lifecycle_rule {
-        id      = "long-term"
-        enabled = true
+  lifecycle_rule {
+    id      = "long-term"
+    enabled = true
 
-        transition {
-            days          = 30
-            storage_class = "STANDARD_IA"
-        }
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
     }
+  }
 
-    server_side_encryption_configuration {
-        rule {
-            apply_server_side_encryption_by_default {
-                sse_algorithm = "aws:kms"
-            }
-        }
+  server_side_encryption_configuration {
+    rule {
+      apply_server_side_encryption_by_default {
+        sse_algorithm = "aws:kms"
+      }
     }
-} 
+  }
+}
 
 data "template_file" "config_data" {
   template = <<-EOF
@@ -278,7 +327,7 @@ data "template_file" "config_data" {
         \"db_user\":\"csye6225\",\"db_password\":\"${var.password}\",
         \"default_database\":\"csye6225\",\"db_port\":3306,
         \"bucketName\":\"${aws_s3_bucket.s3.bucket}\",
-        \"replicaDb\":\"${aws_db_instance.rds-replica.address}\",
+        \"replicaDb\":\"${aws_db_instance.csye6225.endpoint}"\",
         \"SNS_TOPIC_ARN\":\"${aws_sns_topic.sns_email.arn}\"}" > config.json
         cd ..
         sudo chmod -R 777 server
@@ -286,7 +335,7 @@ data "template_file" "config_data" {
 }
 
 resource "aws_iam_role" "ec2_s3_access_role" {
-  name               = "EC2-CSYE6225"
+  name = "EC2-CSYE6225"
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
@@ -300,15 +349,15 @@ resource "aws_iam_role" "ec2_s3_access_role" {
       },
     ]
   })
-   tags = {
+  tags = {
     Name = "CodeDeployEC2ServiceRole"
   }
 }
 
 resource "aws_iam_policy" "policy" {
-    name = "WebAppS3"
-    description = "ec2 will be able to talk to s3 buckets"
-    policy = <<-EOF
+  name        = "WebAppS3"
+  description = "ec2 will be able to talk to s3 buckets"
+  policy      = <<-EOF
     {
     "Version": "2012-10-17",
     "Statement": [
@@ -337,56 +386,92 @@ resource "aws_iam_role_policy_attachment" "test-attach" {
   policy_arn = aws_iam_policy.policy.arn
 }
 
-resource "aws_iam_instance_profile" "s3_profile" {                             
-    name  = "s3_profile_3"                         
-    role = aws_iam_role.ec2_s3_access_role.name
+resource "aws_iam_instance_profile" "s3_profile" {
+  name = "s3_profile_3"
+  role = aws_iam_role.ec2_s3_access_role.name
 }
 
-resource "aws_launch_configuration" "as_conf" {
-  name                   = "asg_launch_config"
-  image_id               =  data.aws_ami.csye_6225_custom_ami.id
-  instance_type          = "t2.micro"
-  security_groups        = ["${aws_security_group.application.id}"]
-  key_name               = var.ec2_key
-  iam_instance_profile   = "${aws_iam_instance_profile.s3_profile.name}"
-  associate_public_ip_address = true
-  user_data                   = data.template_file.config_data.rendered
+resource "aws_kms_key" "key" {
+  description              = "Custom Managed Key for EBS"
+  policy = <<EOF
+{
+    "Version": "2012-10-17",
+    "Id": "key-default-1",
+    "Statement": [
+        {
+            "Sid": "Enable IAM User Permissions",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": [
+                    "arn:aws:iam::${local.aws_user_account_id}:root",
+                    "arn:aws:iam::${local.aws_user_account_id}:user/prod"
+                ]
+            },
+            "Action": "kms:*",
+            "Resource": "*"
+        },
+        {
+            "Sid": "Allow service-linked role use of the customer managed key",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::${local.aws_user_account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+            },
+            "Action": [
+                "kms:Encrypt",
+                "kms:Decrypt",
+                "kms:ReEncrypt*",
+                "kms:GenerateDataKey*",
+                "kms:DescribeKey"
+            ],
+            "Resource": "*"
+        },
+        {
+            "Sid": "Allow attachment of persistent resources",
+            "Effect": "Allow",
+            "Principal": {
+                "AWS": "arn:aws:iam::${local.aws_user_account_id}:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling"
+            },
+            "Action": "kms:CreateGrant",
+            "Resource": "*",
+            "Condition": {
+                "Bool": {
+                    "kms:GrantIsForAWSResource": "true"
+                }
+            }
+        }
+    ]
+}
+EOF
+}
 
-  root_block_device {
-    volume_type           = "gp2"
-    volume_size           = 20
-    delete_on_termination = true
-  }
+resource "aws_launch_template" "asg_launch_template" {
   depends_on = [aws_s3_bucket.s3, aws_db_instance.csye6225]
+  name       = "asg_launch_temp"
+  iam_instance_profile {
+    name = aws_iam_instance_profile.s3_profile.name
+  }
+  key_name               = var.ec2_key
+  image_id               = data.aws_ami.csye_6225_custom_ami.id
+  instance_type          = "t2.micro"
+  vpc_security_group_ids = ["${aws_security_group.application.id}"]
+  user_data              = base64encode("${data.template_file.config_data.rendered}")
+  block_device_mappings {
+    device_name = "/dev/sda1"
+
+    ebs {
+      volume_size           = 25
+      volume_type           = "gp2"
+      delete_on_termination = true
+      encrypted             = true
+      kms_key_id            = aws_kms_key.key.arn
+    }
+  }
 }
-
-#ec2
-# resource "aws_instance" "csye6225_webapp" {
-
-#   depends_on = [aws_db_instance.csye6225]
-#   ami           = data.aws_ami.csye_6225_custom_ami.id
-#   instance_type = "t2.micro"
-#   vpc_security_group_ids  = [aws_security_group.application.id]
-#   disable_api_termination = false
-
-#   subnet_id = aws_subnet.vpc_01_subnet[0].id
-#   key_name  = var.ec2_key
-
-#   root_block_device {
-#     delete_on_termination = true
-#     volume_size           = 20
-#     volume_type           = "gp2"
-#   }
-
-#   iam_instance_profile = "${aws_iam_instance_profile.s3_profile.name}"
-#     user_data = data.template_file.config_data.rendered
-# }
-
 
 # CodeDeploy-EC2-S3 policy allows EC2 instances to read data from S3 buckets. This policy is required for EC2 instances to download latest application revision.
 resource "aws_iam_role_policy" "CodeDeploy_EC2_S3" {
   name = "CodeDeploy-EC2-S3"
-  role = "${aws_iam_role.ec2_s3_access_role.id}"
+  role = aws_iam_role.ec2_s3_access_role.id
 
   policy = <<EOF
 {
@@ -560,11 +645,11 @@ resource "aws_codedeploy_app" "code_deploy_app" {
 }
 
 resource "aws_codedeploy_deployment_group" "code_deploy_deployment_group" {
-  app_name               = "${aws_codedeploy_app.code_deploy_app.name}"
+  app_name               = aws_codedeploy_app.code_deploy_app.name
   deployment_group_name  = "csye6225-webapp-deployment"
   deployment_config_name = "CodeDeployDefault.AllAtOnce"
-  service_role_arn       = "${aws_iam_role.code_deploy_role.arn}"
-  autoscaling_groups = ["${aws_autoscaling_group.autoscaling.name}"]
+  service_role_arn       = aws_iam_role.code_deploy_role.arn
+  autoscaling_groups     = ["${aws_autoscaling_group.autoscaling.name}"]
 
 
 
@@ -593,72 +678,55 @@ resource "aws_codedeploy_deployment_group" "code_deploy_deployment_group" {
 data "aws_caller_identity" "current" {}
 
 locals {
-  aws_user_account_id = "${data.aws_caller_identity.current.account_id}"
+  aws_user_account_id = data.aws_caller_identity.current.account_id
 }
 
 # Attach the policy for CodeDeploy role for webapp
 resource "aws_iam_role_policy_attachment" "AWSCodeDeployRole" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSCodeDeployRole"
-  role       = "${aws_iam_role.code_deploy_role.name}"
+  role       = aws_iam_role.code_deploy_role.name
 }
 
 resource "aws_iam_user_policy_attachment" "ghactions-app_ec2_policy_attach" {
   user       = "ghactions-app"
-  policy_arn = "${aws_iam_policy.ghactions-app_user_policy.arn}"
+  policy_arn = aws_iam_policy.ghactions-app_user_policy.arn
 }
 
 resource "aws_iam_user_policy_attachment" "ghactions-app_s3_policy_attach" {
   user       = "ghactions-app"
-  policy_arn = "${aws_iam_policy.gh_upload_s3.arn}"
+  policy_arn = aws_iam_policy.gh_upload_s3.arn
 }
 
 
 resource "aws_iam_user_policy_attachment" "ghactions-app_codedeploy_policy_attach" {
   user       = "ghactions-app"
-  policy_arn = "${aws_iam_policy.GH_Code_Deploy.arn}"
+  policy_arn = aws_iam_policy.GH_Code_Deploy.arn
 }
 
-# data "aws_instance" "myinstance" {
-  
-#   filter {
-#     name = "tag:Name"
-#     values = ["myEC2Instance"]
-#   }
-# }
-
-
-# add/update the DNS record api.dev.yourdomainname.tld. to the public IP address of the EC2 instance 
 data "aws_route53_zone" "selected" {
-  name         = "${var.domain_Name}"
+  name         = var.domain_Name
   private_zone = false
 }
 
-# resource "aws_route53_record" "www" {
-#   zone_id = data.aws_route53_zone.selected.zone_id
-#   # name    = "api.${data.aws_route53_zone.selected.name}"
-#   name    = "${var.domain_Name}"
-
-#   type    = "A"
-#   ttl     = "60"
-#   records = ["${data.aws_instance.myinstance.public_ip}"]
-# }
-
 resource "aws_iam_role_policy_attachment" "AmazonCloudWatchAgent" {
   policy_arn = "arn:aws:iam::aws:policy/CloudWatchAgentServerPolicy"
-  role       = "${aws_iam_role.ec2_s3_access_role.name}"
+  role       = aws_iam_role.ec2_s3_access_role.name
 }
 
 
 #Autoscaling Group
 resource "aws_autoscaling_group" "autoscaling" {
   name                 = "autoscaling-group"
-  launch_configuration = "${aws_launch_configuration.as_conf.name}"
+launch_template {
+    id      = aws_launch_template.asg_launch_template.id
+    version = aws_launch_template.asg_launch_template.latest_version
+  }
   min_size             = 3
   max_size             = 5
   default_cooldown     = 60
   desired_capacity     = 3
-  vpc_zone_identifier = ["${aws_subnet.vpc_01_subnet[0].id}"]
-  target_group_arns = ["${aws_lb_target_group.albTargetGroup.arn}"]
+  vpc_zone_identifier  = ["${aws_subnet.vpc_01_subnet[0].id}"]
+  target_group_arns    = ["${aws_lb_target_group.albTargetGroup.arn}"]
   tag {
     key                 = "Name"
     value               = "myEC2Instance"
@@ -670,7 +738,7 @@ resource "aws_lb_target_group" "albTargetGroup" {
   name     = "albTargetGroup"
   port     = "8000"
   protocol = "HTTP"
-  vpc_id   = "${aws_vpc.vpc_01.id}"
+  vpc_id   = aws_vpc.vpc_01.id
   tags = {
     name = "albTargetGroup"
   }
@@ -689,7 +757,7 @@ resource "aws_lb_target_group" "albTargetGroup" {
 resource "aws_autoscaling_policy" "WebServerScaleUpPolicy" {
   name                   = "WebServerScaleUpPolicy"
   adjustment_type        = "ChangeInCapacity"
-  autoscaling_group_name = "${aws_autoscaling_group.autoscaling.name}"
+  autoscaling_group_name = aws_autoscaling_group.autoscaling.name
   cooldown               = 60
   scaling_adjustment     = 1
 }
@@ -697,7 +765,7 @@ resource "aws_autoscaling_policy" "WebServerScaleUpPolicy" {
 resource "aws_autoscaling_policy" "WebServerScaleDownPolicy" {
   name                   = "WebServerScaleDownPolicy"
   adjustment_type        = "ChangeInCapacity"
-  autoscaling_group_name = "${aws_autoscaling_group.autoscaling.name}"
+  autoscaling_group_name = aws_autoscaling_group.autoscaling.name
   cooldown               = 60
   scaling_adjustment     = -1
 }
@@ -717,16 +785,16 @@ resource "aws_cloudwatch_metric_alarm" "scaleDown" {
 }
 
 resource "aws_cloudwatch_metric_alarm" "scaleUp" {
-  alarm_name                = "terraform-scaleUp"
-  comparison_operator       = "GreaterThanOrEqualToThreshold"
-  evaluation_periods        = "2"
-  metric_name               = "CPUUtilization"
-  namespace                 = "AWS/EC2"
-  period                    = "120"
-  statistic                 = "Average"
-  threshold                 = "5"
-  alarm_description         = "Scale Up when average cpu is below 5%"
-  alarm_actions     = ["${aws_autoscaling_policy.WebServerScaleUpPolicy.arn}"]
+  alarm_name          = "terraform-scaleUp"
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  evaluation_periods  = "2"
+  metric_name         = "CPUUtilization"
+  namespace           = "AWS/EC2"
+  period              = "120"
+  statistic           = "Average"
+  threshold           = "5"
+  alarm_description   = "Scale Up when average cpu is below 5%"
+  alarm_actions       = ["${aws_autoscaling_policy.WebServerScaleUpPolicy.arn}"]
 
   insufficient_data_actions = []
 }
@@ -735,10 +803,10 @@ resource "aws_cloudwatch_metric_alarm" "scaleUp" {
 #Load Balancer Security Group
 resource "aws_security_group" "loadBalancer" {
   name   = "loadBalance_security_group"
-  vpc_id = "${aws_vpc.vpc_01.id}"
+  vpc_id = aws_vpc.vpc_01.id
   ingress {
-    from_port   = 80
-    to_port     = 80
+    from_port   = 443
+    to_port     = 443
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -761,7 +829,7 @@ resource "aws_lb" "application-Load-Balancer" {
   internal           = false
   load_balancer_type = "application"
   security_groups    = ["${aws_security_group.loadBalancer.id}"]
-  subnets            = "${aws_subnet.vpc_01_subnet.*.id}"
+  subnets            = aws_subnet.vpc_01_subnet.*.id
   ip_address_type    = "ipv4"
   tags = {
     Environment = "${var.aws_profile_name}"
@@ -770,28 +838,29 @@ resource "aws_lb" "application-Load-Balancer" {
 }
 
 resource "aws_lb_listener" "webapp-Listener" {
-  load_balancer_arn = "${aws_lb.application-Load-Balancer.arn}"
-  port              = "80"
-  protocol          = "HTTP"
+  load_balancer_arn = aws_lb.application-Load-Balancer.arn
+  port              = "443"
+  protocol          = "HTTPS"
   default_action {
     type             = "forward"
-    target_group_arn = "${aws_lb_target_group.albTargetGroup.arn}"
+    target_group_arn = aws_lb_target_group.albTargetGroup.arn
   }
+  certificate_arn = "arn:aws:acm:us-east-1:${local.aws_user_account_id}:certificate/21423e9b-cf2c-4f42-86da-11b765bd2615"
 }
 
 # end 
 
 resource "aws_route53_record" "www" {
-   zone_id = data.aws_route53_zone.selected.zone_id
-   name    = data.aws_route53_zone.selected.name
-   type    = "A"
-  
-   alias {
-     name = aws_lb.application-Load-Balancer.dns_name
-     zone_id = aws_lb.application-Load-Balancer.zone_id
-     evaluate_target_health = true
-   }
- }
+  zone_id = data.aws_route53_zone.selected.zone_id
+  name    = data.aws_route53_zone.selected.name
+  type    = "A"
+
+  alias {
+    name                   = aws_lb.application-Load-Balancer.dns_name
+    zone_id                = aws_lb.application-Load-Balancer.zone_id
+    evaluate_target_health = true
+  }
+}
 
 
 
@@ -808,7 +877,7 @@ resource "aws_dynamodb_table" "dynamodb-table" {
     name = "id"
     type = "S"
   }
-   ttl {
+  ttl {
     attribute_name = "ttl"
     enabled        = true
   }
@@ -872,8 +941,8 @@ resource "aws_sns_topic" "sns_email" {
 }
 
 resource "aws_sns_topic_policy" "sns_email_policy" {
-  arn    = "${aws_sns_topic.sns_email.arn}"
-  policy = "${data.aws_iam_policy_document.sns-topic-policy.json}"
+  arn    = aws_sns_topic.sns_email.arn
+  policy = data.aws_iam_policy_document.sns-topic-policy.json
 }
 
 data "aws_iam_policy_document" "sns-topic-policy" {
@@ -937,48 +1006,45 @@ EOF
 
 # Attach the SNS topic policy to the EC2 role
 resource "aws_iam_role_policy_attachment" "ec2_instance_sns" {
-  policy_arn = "${aws_iam_policy.sns_iam_policy.arn}"
-  role       = "${aws_iam_role.ec2_s3_access_role.name}"
+  policy_arn = aws_iam_policy.sns_iam_policy.arn
+  role       = aws_iam_role.ec2_s3_access_role.name
 }
 
 #Lambda Function
 resource "aws_lambda_function" "sns_lambda_email" {
   s3_bucket = "codedeploy.prod.prod.csye6225.me"
   s3_key    = "userAddLamda.zip"
-  /* filename         = "lambda_function.zip" */
-  function_name    = "userAddLamda"
-  role             = "${aws_iam_role.iam_for_lambda.arn}"
-  handler          = "index.handler"
-  runtime          = "nodejs12.x"
-  /* source_code_hash = "${data.archive_file.lambda_zip.output_base64sha256}" */
+  function_name = "userAddLamda"
+  role          = aws_iam_role.iam_for_lambda.arn
+  handler       = "index.handler"
+  runtime       = "nodejs12.x"
   environment {
     variables = {
       timeToLive = "5"
     }
   }
-   //depends_on = [aws_s3_bucket_object.object]
 }
 
 #SNS topic subscription to Lambda
 resource "aws_sns_topic_subscription" "lambda" {
-  topic_arn = "${aws_sns_topic.sns_email.arn}"
+  topic_arn = aws_sns_topic.sns_email.arn
   protocol  = "lambda"
-  endpoint  = "${aws_lambda_function.sns_lambda_email.arn}"
+  endpoint  = aws_lambda_function.sns_lambda_email.arn
 }
 
 #SNS Lambda permission
 resource "aws_lambda_permission" "lambda_sns" {
   statement_id  = "AllowExecutionFromSNS"
   action        = "lambda:InvokeFunction"
-  function_name = "${aws_lambda_function.sns_lambda_email.function_name}"
+  function_name = aws_lambda_function.sns_lambda_email.function_name
   principal     = "sns.amazonaws.com"
-  source_arn    = "${aws_sns_topic.sns_email.arn}"
+  source_arn    = aws_sns_topic.sns_email.arn
 }
 
 #Lambda Policy
 resource "aws_iam_policy" "aws_lambda_policy" {
   name        = "aws_lambda_policy"
-  description = "Lambda Policy for dynamo ses and cloudwatch logs"
+  description = "Lambda Policy for Dynamo Logs"
   policy      = <<EOF
 {
    "Version": "2012-10-17",
@@ -1044,10 +1110,10 @@ EOF
 }
 
 #attach lambda policy with lambda role
-## Check
+## Check 
 resource "aws_iam_role_policy_attachment" "attach_lambda_policy_to_lambda_role" {
-  role       = "${aws_iam_role.iam_for_lambda.name}"
-  policy_arn = "${aws_iam_policy.aws_lambda_policy.arn}"
+  role       = aws_iam_role.iam_for_lambda.name
+  policy_arn = aws_iam_policy.aws_lambda_policy.arn
 }
 
 
@@ -1069,8 +1135,8 @@ resource "aws_iam_policy" "lamda_update_policy" {
 }
 
 resource "aws_iam_user_policy_attachment" "lamda_user_attach" {
-	user = "ghactions-app"
-	policy_arn = aws_iam_policy.lamda_update_policy.arn
+  user       = "ghactions-app"
+  policy_arn = aws_iam_policy.lamda_update_policy.arn
 }
 
 # read replica 
@@ -1093,3 +1159,4 @@ resource "aws_db_instance" "rds-replica" {
   vpc_security_group_ids = [aws_security_group.database.id]
   availability_zone      = "us-east-1b"
 }
+

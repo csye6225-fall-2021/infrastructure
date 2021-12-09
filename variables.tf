@@ -1,11 +1,11 @@
 variable "vpc_cider" {
   type        = string
-  description = "VPC Cider Block"
+  description = "CIDR Block for VPC"
 }
 
 variable "vpc_name" {
   type        = string
-  description = "VPC Cider Block"
+  description = "CIDR Block name for VPC"
 }
 variable "subnet_cidrs" {
   type        = list(string)
@@ -29,12 +29,12 @@ variable "password" {
 
 variable "ec2_key" {
   type        = string
-  description = "ec2 key pair"
+  description = "ec2 key pair for instances"
 }
 
 variable "aws_profile" {
   type        = string
-  description = "AWS account profile to create resources in"
+  description = "AWS Profile"
 }
 
 variable "s3_domain" {
@@ -45,29 +45,26 @@ variable "s3_name" {
   type = string
 }
 
-variable "aws_profile_name"{
-    type = string
+variable "aws_profile_name" {
+  type = string
 }
 
 
-variable "domain_Name"{
-    type = string
+variable "domain_Name" {
+  type = string
 }
-/* variable "aws_user_account_id"{
-    type = number
-} */
 
 variable "region" {
   type = string
 }
 
-variable "dynamo_read_capacity"{
-    type = number
+variable "dynamo_read_capacity" {
+  type = number
 }
 
-variable "dynamo_write_capacity"{
-    type = number
+variable "dynamo_write_capacity" {
+  type = number
 }
-variable "dynamo_dbname"{
-    type = string
+variable "dynamo_dbname" {
+  type = string
 }
