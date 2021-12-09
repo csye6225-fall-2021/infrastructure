@@ -29,4 +29,6 @@ Create a VPC with 3 subnets , routing table , internet gateway and create a publ
                  - terraform apply -var-file="variables.tfvars"
          13. Destroy the created infrastructure
                  - terraform destroy -var-file="variables.tfvars"
-             
+
+# - Importing SSL Certificate to AWS using CLI
+aws --profile prod acm import-certificate --certificate prod_csye6225_me.pem --certificate-chain prod_csye6225_me.ca-bundle --private-key private.key
